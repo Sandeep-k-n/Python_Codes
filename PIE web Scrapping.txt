@@ -1,0 +1,114 @@
+import time
+from selenium import webdriver
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException
+from selenium.webdriver.support.expected_conditions import staleness_of
+import pandas as pd
+import numpy as np
+from datetime import date, datetime
+
+# Initializing Chrome reference
+driver = webdriver.Chrome("C:\\chromedriver\\chromedriver.exe")
+
+#Specify Search URL
+driver.get("https://pieweb.plasteurope.com/default.aspx?pageid=22223")
+
+# Defining Username Password
+Username = 'p.mamta.rao@consultant.volvo.com'
+Password = 'Mamt@1802' 
+
+driver.implicitly_wait(30)
+element_to_hover_over = driver.find_element(By.XPATH,"/html/body/form/span[1]/div/div[1]/div[2]/div/ul/li[1]/a")
+hover = ActionChains(driver).move_to_element(element_to_hover_over)
+hover.perform()
+
+# find username/email field and send the username itself to the input field
+driver.find_element(By.NAME,"ctl04$Header$ctl01$textbox_username").send_keys(Username)
+# find password input field and insert password as well
+driver.find_element(By.NAME,"ctl04$Header$ctl01$textbox_password").send_keys(Password)
+driver.find_element(By.NAME,"ctl04$Header$ctl01$checkbox_permanent").click()
+driver.find_element(By.NAME,"ctl04$Header$ctl01$button_login").click()
+
+driver.implicitly_wait(30)
+
+# Get links and names of materials
+Material_List = [element.get_attribute("text") for element in driver.find_elements(By.XPATH,'//div[@id="layout_wrapper"]/div[@id="layout_spalte_100"]/table[@class="pp-detail-liste"]/tbody/tr/td/a')]
+driver.refresh()
+
+links = [my_elem.get_attribute("href") for my_elem in driver.find_elements(By.XPATH,'//div[@id="layout_wrapper"]/div[@id="layout_spalte_100"]/table[@class="pp-detail-liste"]/tbody/tr/td/a')]
+
+Material = [i for i in Material_List if i.startswith('r')]
+#Recyclate_Material = pd.DataFrame(Material, columns=["Raw_Material"])
+Polymer_Data = pd.DataFrame(columns=['DATE'])
+for link in range(len(links)):
+
+    Virgin_Material = Material_List[link]
+    link = links[link] + '#tab2monate-tab'
+    driver.get(link)
+    # driver.refresh()
+    # driver.implicitly_wait(30)
+
+
+    if len(pd.read_html(driver.page_source)[4]) > 45:
+        df = pd.read_html(driver.page_source)[4]
+    else:
+        df = pd.read_html(driver.page_source)[5]
+
+    df = df.iloc[:, [0,3]]
+    df.columns = ['DATE', Virgin_Material]
+    df = df.drop([0,1, (len(df)-1)])
+    Polymer_Data = df.merge(Polymer_Data, on='DATE', how='outer')
+    
+
+Polymer_Data["Date"] = Polymer_Data["DATE"].apply(pd.to_datetime)
+
+
+Pie_web = Polymer_Data.sort_values(by="Date",ascending=True).set_index("Date").last("13M")
+
+Pie_web = Pie_web.melt(id_vars=["DATE"], 
+        var_name="Raw_Material", 
+        value_name="Amount")
+
+Pie_web["Date"] = Pie_web["DATE"].apply(pd.to_datetime)
+Pie_web["Forecast_Actual"] = np.where(Pie_web.Date < datetime.strptime(datetime.today().strftime("%Y-%m-01"), '%Y-%m-%d'), 'A', 'F')
+Pie_web["Version"] = datetime.now().strftime('%Y%m')
+Pie_web["Period"] = Pie_web['Date'].dt.strftime('%Y%m')
+
+Pie_web = Pie_web.assign(Currency= "EUR")   
+Pie_web = Pie_web.assign(Unit_Of_Weight= "TON") 
+Pie_web = Pie_web.assign(Index = "PIE WEB") 
+Pie_web = Pie_web.dropna(subset=['Amount'])
+
+Pie_web = Pie_web[["Index", "Raw_Material", "Currency", "Unit_Of_Weight", "Period", "Version", "Amount", "Forecast_Actual"]]
+
+
+del Polymer_Data['Date']
+
+Polymer_Data = Polymer_Data.melt(id_vars=["DATE"], 
+        var_name="Raw_Material", 
+        value_name="Amount")
+
+#Recyclate_Material = Recyclate_Material.merge(Polymer_Data, on='Raw_Material', how='inner')
+#Virgin_Material = (Recyclate_Material.merge(Polymer_Data, on='Raw_Material', how='right',indicator=True)\
+                    .query('_merge == "right_only"')\
+                    .drop('_merge', 1))
+
+Virgin_Material.rename(columns = {'DATE_y':'DATE', 'Amount_y':'Amount'}, inplace = True)
+
+Virgin_Material = Virgin_Material[['Raw_Material','DATE','Amount']]
+
+# determining the name of the file
+file_name = 'PIE_WEB.xlsx'
+#recyclate_name = 'Recyclate_Material.xlsx'
+#virgin_mat_name = 'Virgin_Material.xlsx'
+      
+# saving the excel
+Pie_web.to_excel(file_name, index=False)
+#Recyclate_Material.to_excel(recyclate_name, index=False)
+#Virgin_Material.to_excel(virgin_mat_name , index=False)
+
+
+
